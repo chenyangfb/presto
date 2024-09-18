@@ -26,6 +26,7 @@ public interface OrcWriterFlushPolicy
     Optional<FlushReason> shouldFlushStripe(
             int stripeRowCount,
             int bufferedBytes,
+            int retainedBytes,
             boolean dictionaryIsFull);
 
     /**

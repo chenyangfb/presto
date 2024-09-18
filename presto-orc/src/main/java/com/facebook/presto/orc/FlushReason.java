@@ -18,9 +18,10 @@ public enum FlushReason
     /** Stripe accumulated enough rows. */
     MAX_ROWS,
 
-    /** tripe binary size reached size limit. */
+    /** Stripe binary size reached size limit. */
     MAX_BYTES,
-
+    /** Stripe retain size reached size limit. */
+    MAX_RETAIN_BYTES,
     /** Dictionary binary size reached size limit. */
     DICTIONARY_FULL,
 

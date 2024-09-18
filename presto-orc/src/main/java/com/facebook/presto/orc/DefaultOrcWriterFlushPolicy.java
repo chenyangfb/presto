@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.orc;
 
+import com.facebook.airlift.log.Logger;
 import com.facebook.presto.common.Page;
 import io.airlift.units.DataSize;
 
@@ -20,6 +21,7 @@ import java.util.Optional;
 
 import static com.facebook.presto.orc.FlushReason.DICTIONARY_FULL;
 import static com.facebook.presto.orc.FlushReason.MAX_BYTES;
+import static com.facebook.presto.orc.FlushReason.MAX_RETAIN_BYTES;
 import static com.facebook.presto.orc.FlushReason.MAX_ROWS;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
@@ -31,29 +33,38 @@ import static java.util.Objects.requireNonNull;
 public class DefaultOrcWriterFlushPolicy
         implements OrcWriterFlushPolicy
 {
+    private static final Logger log = Logger.get(DefaultOrcWriterFlushPolicy.class);
     public static final DataSize DEFAULT_STRIPE_MIN_SIZE = new DataSize(32, MEGABYTE);
     public static final DataSize DEFAULT_STRIPE_MAX_SIZE = new DataSize(64, MEGABYTE);
+    public static final DataSize DEFAULT_STRIPE_MAX_RETAIN_SIZE = new DataSize(64, MEGABYTE);
     public static final int DEFAULT_STRIPE_MAX_ROW_COUNT = 10_000_000;
 
     private final int stripeMaxRowCount;
     private final int stripeMinBytes;
     private final int stripeMaxBytes;
+    private final int stripeMaxRetainSize;
 
-    private DefaultOrcWriterFlushPolicy(int stripeMaxRowCount, int stripeMinBytes, int stripeMaxBytes)
+    private DefaultOrcWriterFlushPolicy(int stripeMaxRowCount, int stripeMinBytes, int stripeMaxBytes, int stripeMaxRetainSize)
     {
         this.stripeMaxRowCount = stripeMaxRowCount;
         this.stripeMinBytes = stripeMinBytes;
         this.stripeMaxBytes = stripeMaxBytes;
+        this.stripeMaxRetainSize = stripeMaxRetainSize;
+
+        log.error("DefaultOrcWriterFlushPolicy %d %d %d %d", stripeMaxRowCount, stripeMinBytes, stripeMaxBytes, stripeMaxRetainSize);
     }
 
     @Override
-    public Optional<FlushReason> shouldFlushStripe(int stripeRowCount, int bufferedBytes, boolean dictionaryIsFull)
+    public Optional<FlushReason> shouldFlushStripe(int stripeRowCount, int bufferedBytes, int retainedBytes, boolean dictionaryIsFull)
     {
         if (stripeRowCount == stripeMaxRowCount) {
             return Optional.of(MAX_ROWS);
         }
         else if (bufferedBytes > stripeMaxBytes) {
             return Optional.of(MAX_BYTES);
+        }
+        else if (retainedBytes > stripeMaxRetainSize) {
+            return Optional.of(MAX_RETAIN_BYTES);
         }
         else if (dictionaryIsFull) {
             return Optional.of(DICTIONARY_FULL);
@@ -108,6 +119,7 @@ public class DefaultOrcWriterFlushPolicy
         private int stripeMaxRowCount = DEFAULT_STRIPE_MAX_ROW_COUNT;
         private DataSize stripeMinSize = DEFAULT_STRIPE_MIN_SIZE;
         private DataSize stripeMaxSize = DEFAULT_STRIPE_MAX_SIZE;
+        private DataSize stripeMaxRetainSize = DEFAULT_STRIPE_MAX_RETAIN_SIZE;
 
         private Builder() {}
 
@@ -130,13 +142,20 @@ public class DefaultOrcWriterFlushPolicy
             return this;
         }
 
+        public Builder withStripeMaxRetainSize(DataSize stripeMaxRetainSize)
+        {
+            this.stripeMaxRetainSize = requireNonNull(stripeMaxRetainSize, "stripeMaxRetainSize is null");
+            return this;
+        }
+
         public DefaultOrcWriterFlushPolicy build()
         {
             checkArgument(stripeMaxSize.compareTo(stripeMinSize) >= 0, "stripeMaxSize must be greater than or equal to stripeMinSize");
             return new DefaultOrcWriterFlushPolicy(
                     stripeMaxRowCount,
                     toIntExact(stripeMinSize.toBytes()),
-                    toIntExact(stripeMaxSize.toBytes()));
+                    toIntExact(stripeMaxSize.toBytes()),
+                    toIntExact(stripeMaxRetainSize.toBytes()));
         }
     }
 }

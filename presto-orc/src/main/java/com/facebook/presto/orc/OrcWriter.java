@@ -224,6 +224,8 @@ public class OrcWriter
                 .setCompressionKind(compressionKind)
                 .setCompressionLevel(options.getCompressionLevel())
                 .setCompressionMaxBufferSize(options.getMaxCompressionBufferSize())
+                .setMinOutputBufferChunkSize(options.getMinOutputBufferChunkSize())
+                .setMaxOutputBufferChunkSize(options.getMaxOutputBufferChunkSize())
                 .setStringStatisticsLimit(options.getMaxStringStatisticsLimit())
                 .setIntegerDictionaryEncodingEnabled(options.isIntegerDictionaryEncodingEnabled())
                 .setStringDictionarySortingEnabled(options.isStringDictionarySortingEnabled())
@@ -462,7 +464,7 @@ public class OrcWriter
         // flush stripe if necessary
         bufferedBytes = toIntExact(columnWriters.stream().mapToLong(ColumnWriter::getBufferedBytes).sum());
         boolean dictionaryIsFull = dictionaryCompressionOptimizer.isFull(bufferedBytes);
-        Optional<FlushReason> flushReason = flushPolicy.shouldFlushStripe(stripeRowCount, bufferedBytes, dictionaryIsFull);
+        Optional<FlushReason> flushReason = flushPolicy.shouldFlushStripe(stripeRowCount, bufferedBytes, toIntExact(columnWritersRetainedBytes), dictionaryIsFull);
         if (flushReason.isPresent()) {
             flushStripe(flushReason.get());
         }
