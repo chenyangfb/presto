@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.orc;
 
+import com.facebook.airlift.log.Logger;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.slice.BasicSliceInput;
 import io.airlift.slice.ChunkedSliceInput;
@@ -26,6 +27,7 @@ import io.airlift.units.DataSize;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.function.Supplier;
@@ -35,21 +37,24 @@ import static com.facebook.presto.orc.OrcDataSourceUtils.mergeAdjacentDiskRanges
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
 import static java.lang.Math.toIntExact;
+import static java.util.Collections.emptyList;
 import static java.util.Objects.requireNonNull;
 
 public abstract class AbstractOrcDataSource
         implements OrcDataSource
 {
+    private static final Logger log = Logger.get(AbstractOrcDataSource.class);
     private final OrcDataSourceId id;
     private final long size;
     private final DataSize maxMergeDistance;
     private final DataSize maxBufferSize;
     private final DataSize streamBufferSize;
+    private final DataSize streamReadThreshold;
     private final boolean lazyReadSmallRanges;
     private long readTimeNanos;
     private long readBytes;
 
-    public AbstractOrcDataSource(OrcDataSourceId id, long size, DataSize maxMergeDistance, DataSize maxBufferSize, DataSize streamBufferSize, boolean lazyReadSmallRanges)
+    public AbstractOrcDataSource(OrcDataSourceId id, long size, DataSize maxMergeDistance, DataSize maxBufferSize, DataSize streamBufferSize, DataSize streamReadThreshold, boolean lazyReadSmallRanges)
     {
         this.id = requireNonNull(id, "id is null");
 
@@ -59,6 +64,7 @@ public abstract class AbstractOrcDataSource
         this.maxMergeDistance = requireNonNull(maxMergeDistance, "maxMergeDistance is null");
         this.maxBufferSize = requireNonNull(maxBufferSize, "maxBufferSize is null");
         this.streamBufferSize = requireNonNull(streamBufferSize, "streamBufferSize is null");
+        this.streamReadThreshold = requireNonNull(streamReadThreshold, "streamReadThreshold is null");
         this.lazyReadSmallRanges = lazyReadSmallRanges;
     }
 
@@ -123,11 +129,11 @@ public abstract class AbstractOrcDataSource
         //
 
         // split disk ranges into "big" and "small"
-        long maxReadSizeBytes = maxBufferSize.toBytes();
+        long streamReadThresholdBytes = streamReadThreshold.toBytes();
         ImmutableMap.Builder<K, DiskRange> smallRangesBuilder = ImmutableMap.builder();
         ImmutableMap.Builder<K, DiskRange> largeRangesBuilder = ImmutableMap.builder();
         for (Entry<K, DiskRange> entry : diskRanges.entrySet()) {
-            if (entry.getValue().getLength() <= maxReadSizeBytes) {
+            if (entry.getValue().getLength() <= streamReadThresholdBytes) {
                 smallRangesBuilder.put(entry);
             }
             else {
@@ -141,6 +147,54 @@ public abstract class AbstractOrcDataSource
         ImmutableMap.Builder<K, OrcDataSourceInput> slices = ImmutableMap.builder();
         slices.putAll(readSmallDiskRanges(smallRanges));
         slices.putAll(readLargeDiskRanges(largeRanges));
+
+        long smallRangeSize = smallRanges.values().stream().mapToLong(DiskRange::getLength).sum();
+        List<DiskRange> mergedRanges;
+        if (!smallRanges.isEmpty()) {
+            mergedRanges = mergeAdjacentDiskRanges(smallRanges.values(), maxMergeDistance, maxBufferSize);
+        } else {
+            mergedRanges = emptyList();
+        }
+        long mergedRangeSize = mergedRanges.stream().mapToLong(DiskRange::getLength).sum();
+        long largeRangeSize = largeRanges.values().stream().mapToLong(DiskRange::getLength).sum();
+        log.info("smallRanges %d %d",smallRanges.size(), smallRangeSize);
+        log.info("mergedRanges %d %d",mergedRanges.size(), mergedRangeSize);
+        log.info("largeRanges %d %d", largeRanges.size(), largeRangeSize);
+        long readSize = mergedRangeSize + largeRangeSize;
+        log.info("readSize %d", readSize);
+
+        try{
+            long prevMergedRangeSize = Long.parseLong(System.getProperty("READ_SMALL_RANGE_SIZE"));
+            if (prevMergedRangeSize < mergedRangeSize) {
+                System.setProperty("READ_SMALL_RANGE_SIZE", String.valueOf(mergedRangeSize));
+            }
+        }
+        catch (Exception e){
+            e.printStackTrace();
+            System.setProperty("READ_SMALL_RANGE_SIZE", String.valueOf(mergedRangeSize));
+        }
+
+        try{
+            long prevLargeRangeSize = Long.parseLong(System.getProperty("READ_LARGE_RANGE_SIZE"));
+            if (prevLargeRangeSize < largeRangeSize) {
+                System.setProperty("READ_LARGE_RANGE_SIZE", String.valueOf(largeRangeSize));
+            }
+        }
+        catch (Exception e){
+            e.printStackTrace();
+            System.setProperty("READ_LARGE_RANGE_SIZE", String.valueOf(largeRangeSize));
+        }
+
+        try{
+            long prevReadSize = Long.parseLong(System.getProperty("READ_RANGE_SIZE"));
+            if (prevReadSize < readSize) {
+                System.setProperty("READ_RANGE_SIZE", String.valueOf(readSize));
+            }
+        }
+        catch (Exception e){
+            e.printStackTrace();
+            System.setProperty("READ_RANGE_SIZE", String.valueOf(readSize));
+        }
 
         return slices.build();
     }

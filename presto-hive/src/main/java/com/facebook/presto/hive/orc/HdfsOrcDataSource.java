@@ -44,7 +44,7 @@ public class HdfsOrcDataSource
             FSDataInputStream inputStream,
             FileFormatDataSourceStats stats)
     {
-        super(id, size, maxMergeDistance, maxReadSize, streamBufferSize, lazyReadSmallRanges);
+        super(id, size, maxMergeDistance, maxReadSize, streamBufferSize, maxReadSize, lazyReadSmallRanges);
         this.inputStream = requireNonNull(inputStream, "inputStream is null");
         this.stats = requireNonNull(stats, "stats is null");
     }
